@@ -134,16 +134,36 @@ pub async fn digital_meta(
         let state: String = String::from("circulation");
         let jsonb_quota = serde_json::to_value(&quota_control_field2).unwrap();
 
-        let statement = conn.prepare("INSERT INTO digital_currency (id, quota_control_field, explain_info, 
+        let statement = match conn.prepare("INSERT INTO digital_currency (id, quota_control_field, explain_info, 
                     state, owner, create_time, update_time) VALUES ($1, $2, $3, $4, $5, now(), now())")
+            .await{
+                Ok(s) => {
+                    info!("database command success!");
+                    s
+                }
+                Err(error) =>{
+                    warn!("database command failed: {:?}",error);
+                    return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+                }
+            };
+        match conn
+            .execute(
+                &statement,
+                &[&id, &quote_hex, &jsonb_quota, &state, &wallet_hex],
+            )
             .await
-            .unwrap();
-        conn.execute(
-            &statement,
-            &[&id, &quote_hex, &jsonb_quota, &state, &wallet_hex],
-        )
-        .await
-        .unwrap();
+        {
+            Ok(s) => {
+                info!("database parameter success!");
+                s
+            }
+            Err(error) => {
+                warn!("database parameter failed: {:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(
+                    Some(error.to_string()),
+                ));
+            }
+        };
     }
     println!("{:?}", digital);
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))

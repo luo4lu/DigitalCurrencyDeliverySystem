@@ -104,13 +104,55 @@ pub async fn digital_transaction(
         let wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
         //存储为响应数据
         currency.push(pre_currency.to_bytes().encode_hex::<String>());
-        let statement = conn
+        let select_state = match conn
+            .query(
+                "SELECT * from digital_currency where quota_control_field = $1",
+                &[&old_quota_control],
+            )
+            .await
+        {
+            Ok(row) => {
+                info!("electe success: {:?}", row);
+                row
+            }
+            Err(error) => {
+                warn!("select failed :{:?}!!", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(
+                    Some(error.to_string()),
+                ));
+            }
+        };
+        if select_state.is_empty() {
+            warn!("SELECT check quota_control_field failed,please check quota_control_field value");
+            return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+        }
+        let statement = match conn
             .prepare("UPDATE digital_currency SET owner = $1,update_time = now() WHERE quota_control_field = $2")
+            .await{
+                Ok(s) => {
+                    info!("database command success!");
+                    s
+                }
+                Err(error) =>{
+                    warn!("database command failed: {:?}",error);
+                    return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+                }
+            };
+        match conn
+            .execute(&statement, &[&wallet_hex, &old_quota_control])
             .await
-            .unwrap();
-        conn.execute(&statement, &[&wallet_hex, &old_quota_control])
-            .await
-            .unwrap();
+        {
+            Ok(s) => {
+                info!("database parameter success!");
+                s
+            }
+            Err(error) => {
+                warn!("database parameter failed: {:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(
+                    Some(error.to_string()),
+                ));
+            }
+        };
     }
 
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
