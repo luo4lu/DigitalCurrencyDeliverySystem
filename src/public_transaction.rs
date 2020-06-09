@@ -27,7 +27,7 @@ pub async fn digital_transaction(
     req: web::Json<Vec<String>>,
 ) -> impl Responder {
     let mut _rng = thread_rng();
-    //read file for get seed(需要更改拥有者，在接口调用之前需要先产生一个新的额度控制元信息)
+    //read file for get seed
     let mut file = match File::open(&config.meta_path).await {
         Ok(f) => {
             info!("{:?}", f);

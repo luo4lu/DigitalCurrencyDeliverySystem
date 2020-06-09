@@ -9,7 +9,8 @@ edition = "2018"
 [dependencies]
 log = { version = "0.4.5", features = ["std"] }
 simple_logger = "0.5"
-tokio = { version = "0.2", features = ["fs"] }
+reqwest = { version = "0.10", features = ["json"] }
+tokio = { version = "0.2", features = ["fs","full"] }
 actix-web = "2.0"
 actix-rt = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -23,6 +24,7 @@ asymmetric-crypto = { git = "https://github.com/Yinet-project/asymmetric-crypto"
 dislog-hal-sm2 = { git = "https://github.com/Yinet-project/dislog-hal-sm2"}
 kv-object = { git = "https://curdata-bots:SBf(TdV2yeBP@github.com/Curdata-project/KVObject" }
 common-structure = { git = "https://curdata-bots:SBf(TdV2yeBP@github.com/Curdata-project/CommonStructure" }
+
 
 
 [dev-dependencies.cargo-husky]

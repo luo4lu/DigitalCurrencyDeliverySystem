@@ -189,3 +189,81 @@ pub async fn get_cert(config: web::Data<ConfigPath>) -> impl Responder {
         seed: seed_str,
     })))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterRequest {
+    url: String,
+    extra: serde_json::Value,
+}
+
+#[derive(Serialize, Debug)]
+pub struct DcdsRegistRequest {
+    cert: String,
+    extra: serde_json::Value,
+    #[serde(rename = "type")]
+    t: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ClientResponse {
+    pub code: i32,
+    pub message: String,
+}
+
+//注册证书信息到中心管理系统
+#[post("/api/admin/cms")]
+pub async fn register_cms(
+    config: web::Data<ConfigPath>,
+    req: web::Json<RegisterRequest>,
+) -> impl Responder {
+    //read file
+    let mut file = match File::open(&config.meta_path).await {
+        Ok(f) => {
+            info!("{:?}", f);
+            f
+        }
+        Err(e) => {
+            warn!("file open failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_file_error());
+        }
+    };
+    //read json file to string
+    let mut contents = String::new();
+    match file.read_to_string(&mut contents).await {
+        Ok(s) => {
+            info!("{:?}", s);
+            s
+        }
+        Err(e) => {
+            warn!("read file to string failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //Deserialize to the specified data format
+    let keypair_value: Keypair<
+        [u8; 32],
+        Sha3,
+        dislog_hal_sm2::PointInner,
+        dislog_hal_sm2::ScalarInner,
+    > = match serde_json::from_str(&contents) {
+        Ok(de) => {
+            info!("{:?}", de);
+            de
+        }
+        Err(e) => {
+            warn!("Keypair generate failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    let public_str = keypair_value.get_public_key().to_bytes().encode_hex();
+    let params = DcdsRegistRequest {
+        cert: public_str,
+        extra: req.extra.clone(),
+        t: String::from("DCDS"),
+    };
+    let client = reqwest::Client::new();
+    let res = client.post(&req.url).json(&params).send().await.unwrap();
+    let _data: ClientResponse = res.json().await.unwrap();
+
+    HttpResponse::Ok().json(ResponseBody::<()>::new_success(None))
+}

@@ -5,6 +5,7 @@ mod admin_meta;
 mod config;
 mod internal_meta;
 mod public_transaction;
+mod quotas_request;
 
 pub mod response;
 
@@ -22,6 +23,8 @@ async fn main() -> std::io::Result<()> {
             .service(admin_meta::get_cert)
             .service(public_transaction::digital_transaction)
             .service(internal_meta::digital_meta)
+            .service(quotas_request::new_quotas_request)
+            .service(admin_meta::register_cms)
     })
     .bind("127.0.0.1:8808")?
     .run()

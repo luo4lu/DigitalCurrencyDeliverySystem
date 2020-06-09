@@ -101,7 +101,7 @@ pub async fn digital_meta(
             .fill_kvhead(&keypair_sm2, &mut rng)
             .unwrap();
         let quota_control_field2 = digital_currency.get_body().get_quota_info();
-        let quote_hex = quota_control_field2.to_bytes().encode_hex::<String>();
+        let quota_hex = quota_control_field2.to_bytes().encode_hex::<String>();
         let wallet_cert = digital_currency.get_body().get_wallet_cert();
         let wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
 
@@ -149,7 +149,7 @@ pub async fn digital_meta(
         match conn
             .execute(
                 &statement,
-                &[&id, &quote_hex, &jsonb_quota, &state, &wallet_hex],
+                &[&id, &quota_hex, &jsonb_quota, &state, &wallet_hex],
             )
             .await
         {
