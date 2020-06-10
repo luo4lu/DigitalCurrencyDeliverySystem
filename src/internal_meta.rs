@@ -93,6 +93,7 @@ pub async fn digital_meta(
         quota_control_field
             .fill_kvhead(&keypair_sm2, &mut rng)
             .unwrap();
+        //生成数字货币信息
         let mut digital_currency = DigitalCurrencyWrapper::new(
             MsgType::DigitalCurrency,
             DigitalCurrency::new(quota_control_field, target.clone()),
@@ -100,6 +101,7 @@ pub async fn digital_meta(
         digital_currency
             .fill_kvhead(&keypair_sm2, &mut rng)
             .unwrap();
+        //获取重新签名后的额度控制位
         let quota_control_field2 = digital_currency.get_body().get_quota_info();
         let quota_hex = quota_control_field2.to_bytes().encode_hex::<String>();
         let wallet_cert = digital_currency.get_body().get_wallet_cert();

@@ -4,7 +4,6 @@ use actix_web::{post, web, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
-use common_structure::digital_currency::{DigitalCurrency, DigitalCurrencyWrapper};
 use common_structure::issue_quota_request::{IssueQuotaRequest, IssueQuotaRequestWrapper};
 use common_structure::quota_control_field::QuotaControlFieldWrapper;
 use dislog_hal::Bytes;
@@ -115,7 +114,6 @@ pub async fn new_quotas_request(
     //get  digital signature
     let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
     //获取签名证书
-    let cert_sm2 = keypair_sm2.get_certificate();
     let mut issue_info = Vec::<(u64, u64)>::new();
     for info in req.iter() {
         issue_info.push((info.value, info.number));
@@ -177,36 +175,18 @@ pub async fn new_quotas_request(
             warn!("quota issue request verfiy check failed");
             return HttpResponse::Ok().json(ResponseBody::<()>::new_json_parse_error());
         }
-        //生成数字货币
-        let mut digital_currency = DigitalCurrencyWrapper::new(
-            MsgType::DigitalCurrency,
-            DigitalCurrency::new(quota_control_field, cert_sm2.clone()),
-        );
-        //数字货币签名
-        digital_currency
-            .fill_kvhead(&keypair_sm2, &mut rng)
-            .unwrap();
-        //验证签名
-        if digital_currency.verfiy_kvhead().is_ok() {
-            info!("true");
-        } else {
-            warn!("quota issue request verfiy check failed");
-            return HttpResponse::Ok().json(ResponseBody::<()>::new_json_parse_error());
-        }
+        
         //获取数据库存储各个字段信息
-        let quota_control_field2 = digital_currency.get_body().get_quota_info();
-        let quota_hex = quota_control_field2.to_bytes().encode_hex::<String>();
-        let id = (*quota_control_field2.get_body().get_id()).encode_hex::<String>();
+        let quota_hex = quota_control_field.to_bytes().encode_hex::<String>();
+        let id = (*quota_control_field.get_body().get_id()).encode_hex::<String>();
 
-        let wallet_cert = digital_currency.get_body().get_wallet_cert();
-        let wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
-        let state: String = String::from("circulation");
-        let jsonb_quota = serde_json::to_value(&quota_control_field2).unwrap();
+        let state: String = String::from("suspended");
+        let jsonb_quota = serde_json::to_value(&quota_control_field).unwrap();
         //插入数据库语句
         let insert_statement = match conn
             .prepare(
                 "INSERT INTO digital_currency (id, quota_control_field, explain_info, 
-                state, owner, create_time, update_time) VALUES ($1, $2, $3, $4, $5, now(), now())",
+                state, create_time, update_time) VALUES ($1, $2, $3, $4, now(), now())",
             )
             .await
         {
@@ -224,7 +204,7 @@ pub async fn new_quotas_request(
         match conn
             .execute(
                 &insert_statement,
-                &[&id, &quota_hex, &jsonb_quota, &state, &wallet_hex],
+                &[&id, &quota_hex, &jsonb_quota, &state],
             )
             .await
         {
