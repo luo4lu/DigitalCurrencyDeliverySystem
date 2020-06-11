@@ -86,13 +86,13 @@ pub async fn digital_meta(
     let mut digital: Vec<String> = Vec::new();
     for (_index, value) in req.iter().enumerate() {
         let quota_vec = Vec::<u8>::from_hex(value.quota.clone()).unwrap();
-        let mut quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
+        let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
         let target_vec = Vec::<u8>::from_hex(value.target.clone()).unwrap();
         let target = CertificateSm2::from_bytes(&target_vec).unwrap();
 
-        quota_control_field
-            .fill_kvhead(&keypair_sm2, &mut rng)
-            .unwrap();
+        // quota_control_field
+        //     .fill_kvhead(&keypair_sm2, &mut rng)
+        //     .unwrap();
         //生成数字货币信息
         let mut digital_currency = DigitalCurrencyWrapper::new(
             MsgType::DigitalCurrency,
@@ -167,6 +167,7 @@ pub async fn digital_meta(
             }
         };
     }
-    println!("{:?}", digital);
+    //打印
+    //println!("{:?}", digital);
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
 }

@@ -24,6 +24,7 @@ async fn main() -> std::io::Result<()> {
             .service(public_transaction::digital_transaction)
             .service(internal_meta::digital_meta)
             .service(quotas_request::new_quotas_request)
+            .service(quotas_request::conver_currency)
             .service(admin_meta::register_cms)
     })
     .bind("127.0.0.1:8808")?

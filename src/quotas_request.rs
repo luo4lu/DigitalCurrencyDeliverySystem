@@ -4,13 +4,15 @@ use actix_web::{post, web, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
+use common_structure::currency_convert_request::CurrencyConvertRequestWrapper;
+use common_structure::digital_currency::{DigitalCurrency, DigitalCurrencyWrapper};
 use common_structure::issue_quota_request::{IssueQuotaRequest, IssueQuotaRequestWrapper};
 use common_structure::quota_control_field::QuotaControlFieldWrapper;
 use dislog_hal::Bytes;
 use hex::{FromHex, ToHex};
 use kv_object::kv_object::MsgType;
 use kv_object::prelude::KValueObject;
-//use kv_object::sm2::CertificateSm2;
+use kv_object::sm2::CertificateSm2;
 use kv_object::sm2::KeyPairSm2;
 use log::{info, warn};
 use rand::thread_rng;
@@ -175,7 +177,7 @@ pub async fn new_quotas_request(
             warn!("quota issue request verfiy check failed");
             return HttpResponse::Ok().json(ResponseBody::<()>::new_json_parse_error());
         }
-        
+
         //获取数据库存储各个字段信息
         let quota_hex = quota_control_field.to_bytes().encode_hex::<String>();
         let id = (*quota_control_field.get_body().get_id()).encode_hex::<String>();
@@ -202,10 +204,7 @@ pub async fn new_quotas_request(
             }
         };
         match conn
-            .execute(
-                &insert_statement,
-                &[&id, &quota_hex, &jsonb_quota, &state],
-            )
+            .execute(&insert_statement, &[&id, &quota_hex, &jsonb_quota, &state])
             .await
         {
             Ok(s) => {
@@ -222,4 +221,129 @@ pub async fn new_quotas_request(
     }
 
     HttpResponse::Ok().json(ResponseBody::<()>::new_success(None))
+}
+
+//兑换数字货币
+#[post("/api/convert")]
+pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> impl Responder {
+    //连接数据库句柄
+    let conn = data.get().await.unwrap();
+    //解析hex出数据结构
+    let temp = Vec::<u8>::from_hex(req.clone()).unwrap();
+    let currency = CurrencyConvertRequestWrapper::from_bytes(&temp).unwrap();
+    let input_digital = currency.get_body().get_inputs();
+    let output_currency = currency.get_body().get_outputs();
+    let old_state = String::from("circulation");
+    let new_state = String::from("suspended");
+    let mut wallet_hex = String::new();
+    //验证老的数字货币正确性
+    for (_index, value) in input_digital.iter().enumerate() {
+        //签名验证
+        if value.verfiy_kvhead().is_ok() {
+            info!("true");
+        } else {
+            warn!("quota issue request verfiy check failed");
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_json_parse_error());
+        }
+        //验证字段
+        let quota_control_field = value.get_body().get_quota_info();
+        let quota_hex = quota_control_field.to_bytes().encode_hex::<String>();
+        let wallet_cert = value.get_body().get_wallet_cert();
+        wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
+        let select_state = match conn
+            .query(
+                "SELECT * from digital_currency where quota_control_field = $1 AND state = $2 AND owner = $3",
+                &[&quota_hex, &old_state,&wallet_hex],
+            ).await{
+                Ok(row) => {
+                    info!("electe success: {:?}", row);
+                    row
+                }
+                Err(error) => {
+                    warn!("select failed :{:?}!!", error);
+                    return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(
+                        Some(error.to_string()),
+                    ));
+                }
+            };
+        if select_state.is_empty() {
+            warn!("SELECT check digital_currency failed,please check digital_currency value");
+            return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+        }
+        let statement = match conn
+            .prepare("UPDATE digital_currency SET state = $1, owner = NULL,update_time = now() WHERE quota_control_field = $2")
+            .await{
+                Ok(s) => {
+                    info!("database command success!");
+                    s
+                }
+                Err(error) =>{
+                    warn!("database command failed: {:?}",error);
+                    return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+                }
+            };
+        match conn.execute(&statement, &[&new_state, &quota_hex]).await {
+            Ok(s) => {
+                info!("database parameter success!");
+                s
+            }
+            Err(error) => {
+                warn!("database parameter failed: {:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(
+                    Some(error.to_string()),
+                ));
+            }
+        };
+    }
+    //生成数字货币的钱包信息
+    let target_vec = Vec::<u8>::from_hex(wallet_hex.clone()).unwrap();
+    let target = CertificateSm2::from_bytes(&target_vec).unwrap();
+    //存储数字货币
+    let mut new_digital_currency: Vec<String> = Vec::new();
+    for (quota, number) in output_currency.iter() {
+        let str_quota = serde_json::to_value(&quota).unwrap();
+        let size_number = *number as usize;
+        let select_statement = match conn
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
+        &[&new_state, &str_quota]).await{
+            Ok(row) => {
+                info!("select success!{:?}", row);
+                row
+            }
+            Err(error) => {
+                warn!("conver_currency select failde!!{:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+            }
+        };
+        if select_statement.is_empty() {
+            warn!("conver_currency SELECT check uid failed,please check uid value");
+            return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+        }
+        for n in 0..size_number {
+            let id: String = select_statement[n].get(0);
+            let quota_hex: String = select_statement[n].get(1);
+            let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();
+            let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
+            match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3", 
+            &[&old_state, &wallet_hex, &id])
+            .await
+            {
+                Ok(row) => {
+                    info!("update success!{:?}", row);
+                    row
+                }
+                Err(error) => {
+                    warn!("conver_currency update failde!!{:?}", error);
+                    return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+                }
+            };
+            //生成数字货币信息
+            let digital_currency = DigitalCurrencyWrapper::new(
+                MsgType::DigitalCurrency,
+                DigitalCurrency::new(quota_control_field, target.clone()),
+            );
+            new_digital_currency.push(digital_currency.to_bytes().encode_hex::<String>());
+        }
+    }
+    HttpResponse::Ok().json(ResponseBody::new_success(Some(new_digital_currency)))
 }
