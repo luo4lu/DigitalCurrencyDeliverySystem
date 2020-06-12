@@ -61,4 +61,13 @@ impl<T> ResponseBody<T> {
             data,
         }
     }
+
+    ///额度转换金额不一致
+    pub fn currency_convert_error() -> Self {
+        ResponseBody {
+            code: 90006,
+            message: String::from("The amount before and after conversion is not equal"),
+            data: None,
+        }
+    }
 }

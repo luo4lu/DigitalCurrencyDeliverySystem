@@ -235,7 +235,26 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
     let output_currency = currency.get_body().get_outputs();
     let old_state = String::from("circulation");
     let new_state = String::from("suspended");
+    let mut old_sum: u64 = 0;
+    let mut new_sum: u64 = 0;
     let mut wallet_hex = String::new();
+    //兑换前后额度对比
+    for num in input_digital.iter() {
+        let quota_control_field = num.get_body().get_quota_info();
+        //兑换前的货币总和
+        old_sum = old_sum + quota_control_field.get_body().get_value();
+    }
+    for (quota, number) in output_currency.iter() {
+        //转换后的额度总和
+        new_sum = new_sum + (quota * number);
+    }
+    if old_sum != new_sum {
+        warn!(
+            "The amount before and after conversion is not equal,input:{} != output:{}",
+            old_sum, new_sum
+        );
+        return HttpResponse::Ok().json(ResponseBody::<()>::currency_convert_error());
+    }
     //验证老的数字货币正确性
     for (_index, value) in input_digital.iter().enumerate() {
         //签名验证
@@ -250,6 +269,7 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
         let quota_hex = quota_control_field.to_bytes().encode_hex::<String>();
         let wallet_cert = value.get_body().get_wallet_cert();
         wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
+
         let select_state = match conn
             .query(
                 "SELECT * from digital_currency where quota_control_field = $1 AND state = $2 AND owner = $3",
@@ -319,9 +339,13 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
             warn!("conver_currency SELECT check uid failed,please check uid value");
             return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
         }
-        for n in 0..size_number {
-            let id: String = select_statement[n].get(0);
-            let quota_hex: String = select_statement[n].get(1);
+        if size_number >= select_statement.len() {
+            warn!("request convert currency number too many,Lack of money!!!!");
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+        for item in select_statement.iter().take(size_number) {
+            let id: String = item.get(0);
+            let quota_hex: String = item.get(1);
             let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();
             let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
             match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3", 
