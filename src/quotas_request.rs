@@ -242,18 +242,37 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
     for num in input_digital.iter() {
         let quota_control_field = num.get_body().get_quota_info();
         //兑换前的货币总和
-        old_sum = old_sum + quota_control_field.get_body().get_value();
+        old_sum += quota_control_field.get_body().get_value();
     }
     for (quota, number) in output_currency.iter() {
         //转换后的额度总和
-        new_sum = new_sum + (quota * number);
-    }
-    if old_sum != new_sum {
-        warn!(
-            "The amount before and after conversion is not equal,input:{} != output:{}",
-            old_sum, new_sum
-        );
-        return HttpResponse::Ok().json(ResponseBody::<()>::currency_convert_error());
+        new_sum += quota * number;
+        //发行系统中面值额度数量查询
+        let str_quota = serde_json::to_value(&quota).unwrap();
+        let size_number = *number as usize;
+        let select_statement = match conn
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
+        &[&new_state, &str_quota]).await{
+            Ok(row) => {
+                info!("select success!{:?}", row);
+                row
+            }
+            Err(error) => {
+                warn!("conver_currency select failde!!{:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+            }
+        };
+        if size_number > select_statement.len() {
+            warn!("request convert currency number too many,Lack of money!!!!");
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+        if old_sum != new_sum {
+            warn!(
+                "The amount before and after conversion is not equal,input:{} != output:{}",
+                old_sum, new_sum
+            );
+            return HttpResponse::Ok().json(ResponseBody::<()>::currency_convert_error());
+        }
     }
     //验证老的数字货币正确性
     for (_index, value) in input_digital.iter().enumerate() {
@@ -339,10 +358,7 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
             warn!("conver_currency SELECT check uid failed,please check uid value");
             return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
         }
-        if size_number >= select_statement.len() {
-            warn!("request convert currency number too many,Lack of money!!!!");
-            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
-        }
+
         for item in select_statement.iter().take(size_number) {
             let id: String = item.get(0);
             let quota_hex: String = item.get(1);
