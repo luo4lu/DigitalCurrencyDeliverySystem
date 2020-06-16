@@ -171,3 +171,141 @@ pub async fn digital_meta(
     //println!("{:?}", digital);
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
 }
+
+
+//根据总额度申请接口货币接口
+#[derive(Deserialize, Debug)]
+pub struct AmountRequset{
+    bank_num: String, // Base64过银行卡号
+    amount: u64, //总金额数(u64)
+    target: String  //所有者
+}
+
+#[post("/api/external/exchange")]
+pub async fn amount_exchange(
+    data: web::Data<Pool>,
+    req: web::Json<AmountRequset>,
+) -> impl Responder{
+    //连接数据库句柄
+    let conn = data.get().await.unwrap();
+    //存储拆分后的额度
+    let mut quota_vec:Vec<(u64,u64)> = Vec::new();
+    //总额度拆分----------------------begin-------------------
+    let hundred_num:u64 = req.amount/10000;
+    if hundred_num > 0{
+        quota_vec.push((10000, hundred_num));
+    }
+    let fifty_num:u64 = (req.amount%10000)/5000;
+    if fifty_num > 0{
+        quota_vec.push((5000, fifty_num));
+    }
+    let twenty_num:u64 = (req.amount%5000)/2000;
+    if twenty_num > 0{
+        quota_vec.push((2000, twenty_num));
+    }
+    let ten_num:u64 = ((req.amount%5000)%2000)/1000;
+    if ten_num > 0{
+        quota_vec.push((1000, ten_num));
+    }
+    let five_num:u64 = (req.amount%1000)/500;
+    if five_num > 0{
+        quota_vec.push((500, five_num));
+    }
+    let one_num:u64 = (req.amount%500)/100;
+    if one_num > 0{
+        quota_vec.push((100, one_num));
+    }
+    let pentagon_num:u64 = (req.amount%100)/50;
+    if pentagon_num > 0{
+        quota_vec.push((50, pentagon_num));
+    }
+    let dime_num:u64 = (req.amount%50)/10;
+    if dime_num > 0{
+        quota_vec.push((10, dime_num));
+    }
+    let point_num:u64 = req.amount%10;
+    if point_num >0{
+        quota_vec.push((1, point_num));
+    }
+    //------------------------end----------------------------
+    let mut new_sum: u64 = 0;
+    let old_state = String::from("circulation");
+    let new_state = String::from("suspended");
+    for (quota, number) in quota_vec.iter() {
+        //转换后的额度总和
+        new_sum += quota * number;
+        //发行系统中面值额度数量查询
+        let str_quota = serde_json::to_value(&quota).unwrap();
+        let size_number = *number as usize;
+        let select_statement = match conn
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
+        &[&new_state, &str_quota]).await{
+            Ok(row) => {
+                info!("select success!{:?}", row);
+                row
+            }
+            Err(error) => {
+                warn!("conver_currency select failde!!{:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+            }
+        };
+        if size_number > select_statement.len() {
+            warn!("amount_exchange currency number too many,Lack of money!!!!");
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    }
+    if req.amount != new_sum {
+        warn!(
+            "amount_exchange The amount before and after conversion is not equal,input:{} != output:{}",
+            req.amount, new_sum
+        );
+        return HttpResponse::Ok().json(ResponseBody::<()>::currency_convert_error());
+    }
+    let owner_vec = Vec::<u8>::from_hex(req.target.clone()).unwrap();
+    let owner = CertificateSm2::from_bytes(&owner_vec).unwrap();
+    let mut currency :Vec<String> = Vec::new();
+    for (quota, number) in quota_vec.iter() {
+        let str_quota = serde_json::to_value(&quota).unwrap();
+        let size_number = *number as usize;
+        let select_statement = match conn
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
+        &[&new_state,&str_quota]).await{
+            Ok(row) => {
+                info!("select success!{:?}",row);
+                row
+            }
+            Err(error) => {
+                warn!("amount_exchange select failde!!{:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+            }
+        };
+        if select_statement.is_empty() {
+            warn!("amount_exchange SELECT check uid failed,please check uid value");
+            return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+        }
+        for item in select_statement.iter().take(size_number){
+            let id: String = item.get(0);
+            let quota_hex: String = item.get(1);
+            let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();
+            let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
+            match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3",
+            &[&old_state,&req.target,&id])
+            .await{
+                Ok(row) => {
+                    info!("update success!{:?}", row);
+                    row
+                }
+                Err(error) => {
+                    warn!("amount_exchange update failde!!{:?}", error);
+                    return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+                }
+            };
+            let digital_currency = DigitalCurrencyWrapper::new(
+                MsgType::DigitalCurrency,
+                DigitalCurrency::new(quota_control_field, owner.clone()),
+            );
+            currency.push(digital_currency.to_bytes().encode_hex::<String>());
+        }
+    }
+    HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
+}

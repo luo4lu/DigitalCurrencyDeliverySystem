@@ -26,6 +26,7 @@ async fn main() -> std::io::Result<()> {
             .service(quotas_request::new_quotas_request)
             .service(quotas_request::conver_currency)
             .service(admin_meta::register_cms)
+            .service(internal_meta::amount_exchange)
     })
     .bind("127.0.0.1:8808")?
     .run()

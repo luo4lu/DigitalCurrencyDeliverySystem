@@ -266,13 +266,13 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
             warn!("request convert currency number too many,Lack of money!!!!");
             return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
         }
-        if old_sum != new_sum {
-            warn!(
-                "The amount before and after conversion is not equal,input:{} != output:{}",
-                old_sum, new_sum
-            );
-            return HttpResponse::Ok().json(ResponseBody::<()>::currency_convert_error());
-        }
+    }
+    if old_sum != new_sum {
+        warn!(
+            "The amount before and after conversion is not equal,input:{} != output:{}",
+            old_sum, new_sum
+        );
+        return HttpResponse::Ok().json(ResponseBody::<()>::currency_convert_error());
     }
     //验证老的数字货币正确性
     for (_index, value) in input_digital.iter().enumerate() {
