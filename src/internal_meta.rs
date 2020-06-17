@@ -172,59 +172,58 @@ pub async fn digital_meta(
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
 }
 
-
 //根据总额度申请接口货币接口
 #[derive(Deserialize, Debug)]
-pub struct AmountRequset{
+pub struct AmountRequset {
     bank_num: String, // Base64过银行卡号
-    amount: u64, //总金额数(u64)
-    target: String  //所有者
+    amount: u64,      //总金额数(u64)
+    target: String,   //所有者
 }
 
 #[post("/api/external/exchange")]
 pub async fn amount_exchange(
     data: web::Data<Pool>,
     req: web::Json<AmountRequset>,
-) -> impl Responder{
+) -> impl Responder {
     //连接数据库句柄
     let conn = data.get().await.unwrap();
     //存储拆分后的额度
-    let mut quota_vec:Vec<(u64,u64)> = Vec::new();
+    let mut quota_vec: Vec<(u64, u64)> = Vec::new();
     //总额度拆分----------------------begin-------------------
-    let hundred_num:u64 = req.amount/10000;
-    if hundred_num > 0{
+    let hundred_num: u64 = req.amount / 10000;
+    if hundred_num > 0 {
         quota_vec.push((10000, hundred_num));
     }
-    let fifty_num:u64 = (req.amount%10000)/5000;
-    if fifty_num > 0{
+    let fifty_num: u64 = (req.amount % 10000) / 5000;
+    if fifty_num > 0 {
         quota_vec.push((5000, fifty_num));
     }
-    let twenty_num:u64 = (req.amount%5000)/2000;
-    if twenty_num > 0{
+    let twenty_num: u64 = (req.amount % 5000) / 2000;
+    if twenty_num > 0 {
         quota_vec.push((2000, twenty_num));
     }
-    let ten_num:u64 = ((req.amount%5000)%2000)/1000;
-    if ten_num > 0{
+    let ten_num: u64 = ((req.amount % 5000) % 2000) / 1000;
+    if ten_num > 0 {
         quota_vec.push((1000, ten_num));
     }
-    let five_num:u64 = (req.amount%1000)/500;
-    if five_num > 0{
+    let five_num: u64 = (req.amount % 1000) / 500;
+    if five_num > 0 {
         quota_vec.push((500, five_num));
     }
-    let one_num:u64 = (req.amount%500)/100;
-    if one_num > 0{
+    let one_num: u64 = (req.amount % 500) / 100;
+    if one_num > 0 {
         quota_vec.push((100, one_num));
     }
-    let pentagon_num:u64 = (req.amount%100)/50;
-    if pentagon_num > 0{
+    let pentagon_num: u64 = (req.amount % 100) / 50;
+    if pentagon_num > 0 {
         quota_vec.push((50, pentagon_num));
     }
-    let dime_num:u64 = (req.amount%50)/10;
-    if dime_num > 0{
+    let dime_num: u64 = (req.amount % 50) / 10;
+    if dime_num > 0 {
         quota_vec.push((10, dime_num));
     }
-    let point_num:u64 = req.amount%10;
-    if point_num >0{
+    let point_num: u64 = req.amount % 10;
+    if point_num > 0 {
         quota_vec.push((1, point_num));
     }
     //------------------------end----------------------------
@@ -263,7 +262,7 @@ pub async fn amount_exchange(
     }
     let owner_vec = Vec::<u8>::from_hex(req.target.clone()).unwrap();
     let owner = CertificateSm2::from_bytes(&owner_vec).unwrap();
-    let mut currency :Vec<String> = Vec::new();
+    let mut currency: Vec<String> = Vec::new();
     for (quota, number) in quota_vec.iter() {
         let str_quota = serde_json::to_value(&quota).unwrap();
         let size_number = *number as usize;
@@ -283,7 +282,7 @@ pub async fn amount_exchange(
             warn!("amount_exchange SELECT check uid failed,please check uid value");
             return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
         }
-        for item in select_statement.iter().take(size_number){
+        for item in select_statement.iter().take(size_number) {
             let id: String = item.get(0);
             let quota_hex: String = item.get(1);
             let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();

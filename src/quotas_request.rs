@@ -225,9 +225,55 @@ pub async fn new_quotas_request(
 
 //兑换数字货币
 #[post("/api/convert")]
-pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> impl Responder {
+pub async fn conver_currency(data: web::Data<Pool>, config: web::Data<ConfigPath>, 
+    req: web::Json<String>) -> impl Responder {
     //连接数据库句柄
     let conn = data.get().await.unwrap();
+    let mut rng = thread_rng();
+
+    //read file for get seed
+    let mut file = match File::open(&config.meta_path).await {
+        Ok(f) => {
+            info!("{:?}", f);
+            f
+        }
+        Err(e) => {
+            warn!("file open failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_file_error());
+        }
+    };
+    //read json file to string
+    let mut contents = String::new();
+    match file.read_to_string(&mut contents).await {
+        Ok(s) => {
+            info!("{:?}", s);
+            s
+        }
+        Err(e) => {
+            warn!("read file to string failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //deserialize to the specified data format
+    let keypair_value: keypair::Keypair<
+        [u8; 32],
+        Sha3,
+        dislog_hal_sm2::PointInner,
+        dislog_hal_sm2::ScalarInner,
+    > = match serde_json::from_str(&contents) {
+        Ok(de) => {
+            info!("{:?}", de);
+            de
+        }
+        Err(e) => {
+            warn!("Keypair generate failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //pass encode hex conversion get seed
+    let seed: [u8; 32] = keypair_value.get_seed();
+    //get  digital signature
+    let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
     //解析hex出数据结构
     let temp = Vec::<u8>::from_hex(req.clone()).unwrap();
     let currency = CurrencyConvertRequestWrapper::from_bytes(&temp).unwrap();
@@ -378,10 +424,11 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
                 }
             };
             //生成数字货币信息
-            let digital_currency = DigitalCurrencyWrapper::new(
+            let mut digital_currency = DigitalCurrencyWrapper::new(
                 MsgType::DigitalCurrency,
                 DigitalCurrency::new(quota_control_field, target.clone()),
             );
+            digital_currency.fill_kvhead(&keypair_sm2, &mut rng).unwrap();
             new_digital_currency.push(digital_currency.to_bytes().encode_hex::<String>());
         }
     }
