@@ -4,12 +4,12 @@ use actix_web::{post, web, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
-use common_structure::digital_currency::DigitalCurrencyWrapper;
-use common_structure::transaction::{Transaction, TransactionWrapper};
+//use common_structure::digital_currency::DigitalCurrencyWrapper;
+use common_structure::transaction:: TransactionWrapper;
 use dislog_hal::Bytes;
 use hex::{FromHex, ToHex};
-use kv_object::kv_object::MsgType;
-use kv_object::prelude::KValueObject;
+//use kv_object::kv_object::MsgType;
+//use kv_object::prelude::KValueObject;
 //use kv_object::sm2::CertificateSm2;
 use kv_object::sm2::KeyPairSm2;
 use log::{info, warn};
@@ -70,8 +70,7 @@ pub async fn digital_transaction(
     let seed: [u8; 32] = keypair_value.get_seed();
     //get  digital signature
     let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
-    //钱包新的所有者证书
-    let wallet_cert_2 = keypair_sm2.get_certificate();
+    
     //新的货币所有者存储
     let mut currency: Vec<String> = Vec::new();
     //存储到数据库
@@ -79,26 +78,15 @@ pub async fn digital_transaction(
 
     for (_index, value) in req.iter().enumerate() {
         let vec = Vec::<u8>::from_hex(value.clone()).unwrap();
-        let old_currency = DigitalCurrencyWrapper::from_bytes(&vec).unwrap();
-        let old_quota_control = (old_currency.get_body().get_quota_info())
-            .to_bytes()
-            .encode_hex::<String>();
-        let transaction_ok = TransactionWrapper::new(
-            MsgType::Transaction,
-            Transaction::new(wallet_cert_2.clone(), old_currency.clone()),
-        );
+        let transaction_ok = TransactionWrapper::from_bytes(&vec).unwrap();
         //新的新的货币
         let pre_currency = transaction_ok
             .get_body()
             .trans_currency(&keypair_sm2)
             .unwrap();
-        //验证签名
-        if pre_currency.verfiy_kvhead().is_ok() {
-            info!("true");
-        } else {
-            warn!("transcation signature verfiy check failed");
-            return HttpResponse::Ok().json(ResponseBody::<()>::new_json_parse_error());
-        }
+        let old_quota_control = (pre_currency.get_body().get_quota_info())
+            .to_bytes()
+            .encode_hex::<String>();
         //获取所有者
         let wallet_cert = pre_currency.get_body().get_wallet_cert();
         let wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();

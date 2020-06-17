@@ -183,10 +183,57 @@ pub struct AmountRequset {
 #[post("/api/external/exchange")]
 pub async fn amount_exchange(
     data: web::Data<Pool>,
+    config: web::Data<ConfigPath>,
     req: web::Json<AmountRequset>,
 ) -> impl Responder {
     //连接数据库句柄
     let conn = data.get().await.unwrap();
+    let mut rng = thread_rng();
+
+    //read file for get seed
+    let mut file = match File::open(&config.meta_path).await {
+        Ok(f) => {
+            info!("{:?}", f);
+            f
+        }
+        Err(e) => {
+            warn!("file open failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_file_error());
+        }
+    };
+    //read json file to string
+    let mut contents = String::new();
+    match file.read_to_string(&mut contents).await {
+        Ok(s) => {
+            info!("{:?}", s);
+            s
+        }
+        Err(e) => {
+            warn!("read file to string failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //deserialize to the specified data format
+    let keypair_value: keypair::Keypair<
+        [u8; 32],
+        Sha3,
+        dislog_hal_sm2::PointInner,
+        dislog_hal_sm2::ScalarInner,
+    > = match serde_json::from_str(&contents) {
+        Ok(de) => {
+            info!("{:?}", de);
+            de
+        }
+        Err(e) => {
+            warn!("Keypair generate failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //pass encode hex conversion get seed
+    let seed: [u8; 32] = keypair_value.get_seed();
+    //get  digital signature
+    let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
+
     //存储拆分后的额度
     let mut quota_vec: Vec<(u64, u64)> = Vec::new();
     //总额度拆分----------------------begin-------------------
@@ -299,10 +346,11 @@ pub async fn amount_exchange(
                     return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
                 }
             };
-            let digital_currency = DigitalCurrencyWrapper::new(
+            let mut digital_currency = DigitalCurrencyWrapper::new(
                 MsgType::DigitalCurrency,
                 DigitalCurrency::new(quota_control_field, owner.clone()),
             );
+            digital_currency.fill_kvhead(&keypair_sm2, &mut rng).unwrap();
             currency.push(digital_currency.to_bytes().encode_hex::<String>());
         }
     }
