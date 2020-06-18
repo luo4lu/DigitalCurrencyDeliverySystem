@@ -356,3 +356,65 @@ pub async fn amount_exchange(
     }
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
 }
+
+
+//传入一组数字货币返回总额度
+#[derive(Deserialize, Debug)]
+pub struct CurrencyRequset {
+    bank_num: String, // Base64过银行卡号
+    currency: Vec<String>,      //需要查询的一组数字货币
+}
+
+#[post("/api/external/widthdraw")]
+pub async fn currency_widthdraw(
+    data: web::Data<Pool>,
+    req: web::Json<CurrencyRequset>,
+) -> impl Responder{
+    //连接数据库
+    let conn = data.get().await.unwrap();
+    //货币状态
+    let use_state = String::from("circulation");
+    let unuse_state = String::from("suspended");
+    //总额度数
+    let mut amount: u64 = 0;
+    for currency_quota in req.currency.iter(){
+        let currency_vec = Vec::<u8>::from_hex(currency_quota).unwrap();
+        let digital_currency = DigitalCurrencyWrapper::from_bytes(&currency_vec).unwrap();
+        let quota_control_field = digital_currency.get_body().get_quota_info();
+        let quota = quota_control_field.get_body().get_value();
+        let str_quota = serde_json::to_value(&quota).unwrap();
+        amount += quota;
+        let select_statement = match conn
+            .query("select id from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
+        &[&unuse_state, &str_quota]).await{
+            Ok(row) => {
+                info!("select success!{:?}", row);
+                row
+            }
+            Err(error) => {
+                warn!("currency_widthdraw select failde!!{:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+            }
+        };
+        if select_statement.is_empty() {
+            warn!("SELECT check currency_widthdraw failed,please check digital_currency value");
+            return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+        }
+        //每张货币唯一标识id
+        let id: String = select_statement[0].get(0);
+        match conn.query("UPDATE digital_currency SET state = $1,owner = NULL,update_time = now() where id = $2", 
+            &[&use_state, &id])
+            .await
+            {
+                Ok(row) => {
+                    info!("update success!{:?}", row);
+                    row
+                }
+                Err(error) => {
+                    warn!("currency_widthdraw update failde!!{:?}", error);
+                    return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+                }
+            };
+    }
+    HttpResponse::Ok().json(ResponseBody::new_success(Some(amount)))
+}
