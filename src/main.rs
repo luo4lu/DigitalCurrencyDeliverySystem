@@ -1,12 +1,12 @@
 use actix_web::{App, HttpServer};
 use log::Level;
-use std::env;
 mod admin_meta;
 mod config;
 mod internal_meta;
 mod public_transaction;
 mod quotas_request;
 mod config_command;
+mod get_quota_info;
 use clap::ArgMatches;
 
 pub mod response;
@@ -22,7 +22,6 @@ async fn main() -> std::io::Result<()> {
     }else{
         path = String::from("127.0.0.1:8888");
     }
-    println!("Path = {:?}",path);
     HttpServer::new(|| {
         App::new()
             .data(config::get_db())
@@ -37,6 +36,7 @@ async fn main() -> std::io::Result<()> {
             .service(admin_meta::register_cms)
             .service(internal_meta::amount_exchange)
             .service(internal_meta::currency_widthdraw)
+            .service(get_quota_info::get_all_quota_info)
     })
     .bind(path)?
     .run()

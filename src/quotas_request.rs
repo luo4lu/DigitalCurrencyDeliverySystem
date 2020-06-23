@@ -19,6 +19,8 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::prelude::*;
+use crate::config_command;
+use clap::ArgMatches;
 //数据库相关
 use deadpool_postgres::Pool;
 
@@ -135,10 +137,15 @@ pub async fn new_quotas_request(
         return HttpResponse::Ok().json(ResponseBody::<()>::new_json_parse_error());
     }
     let issue_hex = issue.to_bytes().encode_hex::<String>();
-
     //Http请求中心管理系统对额度请求重新签名
+    let mut cmc_url = String::new();
+    let matches: ArgMatches = config_command::get_command();
+    if let Some(c) = matches.value_of("cms"){
+        cmc_url = "http://".to_string() + &c + "/api/dcds/qouta_issue";
+    }else{
+        cmc_url = String::from("http://localhost:8077/api/dcds/qouta_issue");
+    }
     let params = CentralRequest::new(issue_hex);
-    let cmc_url = String::from("http://localhost:8077/api/dcds/qouta_issue");
     let cmc_client = reqwest::Client::new();
     let cmc_res = cmc_client
         .post(&cmc_url)
@@ -149,9 +156,14 @@ pub async fn new_quotas_request(
     let cmc_response: IssueResponse = cmc_res.json().await.unwrap();
 
     //Http请求额度管理系统生成额度控制位
+    let mut qms_url = String::new();
+    if let Some(q) = matches.value_of("qms"){
+        qms_url = "http://".to_string() + &q + "/api/quota";
+    }else{
+        qms_url = String::from("http://localhost:8088/api/quota");
+    }
     let repeat_issue = cmc_response.data;
     let params_to = QuotaRequest::new(repeat_issue);
-    let qms_url = String::from("http://localhost:8088/api/quota");
     let qms_client = reqwest::Client::new();
     let qms_res = qms_client
         .post(&qms_url)
@@ -334,7 +346,6 @@ pub async fn conver_currency(data: web::Data<Pool>, config: web::Data<ConfigPath
         let quota_hex = quota_control_field.to_bytes().encode_hex::<String>();
         let wallet_cert = value.get_body().get_wallet_cert();
         wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
-
         let select_state = match conn
             .query(
                 "SELECT * from digital_currency where quota_control_field = $1 AND state = $2 AND owner = $3",

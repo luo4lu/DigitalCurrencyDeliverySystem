@@ -335,7 +335,7 @@ pub async fn amount_exchange(
             let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();
             let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
             match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3",
-            &[&old_state,&req.target,&id])
+            &[&old_state,&req.target.to_ascii_lowercase(),&id])
             .await{
                 Ok(row) => {
                     info!("update success!{:?}", row);
@@ -365,6 +365,7 @@ pub struct CurrencyRequset {
     currency: Vec<String>,      //需要查询的一组数字货币
 }
 
+//提现
 #[post("/api/external/widthdraw")]
 pub async fn currency_widthdraw(
     data: web::Data<Pool>,
