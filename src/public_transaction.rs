@@ -94,7 +94,7 @@ pub async fn digital_transaction(
         currency.push(pre_currency.to_bytes().encode_hex::<String>());
         let select_state = match conn
             .query(
-                "SELECT * from digital_currency where quota_control_field = $1",
+                "SELECT id from digital_currency where quota_control_field = $1",
                 &[&old_quota_control],
             )
             .await
@@ -114,6 +114,7 @@ pub async fn digital_transaction(
             warn!("SELECT check quota_control_field failed,please check quota_control_field value");
             return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
         }
+        let id:String = select_state[0].get(0);
         let statement = match conn
             .prepare("UPDATE digital_currency SET owner = $1,update_time = now() WHERE quota_control_field = $2")
             .await{
@@ -141,6 +142,25 @@ pub async fn digital_transaction(
                 ));
             }
         };
+        match conn
+            .query(
+                "INSERT INTO transaction_history (id, owner, create_time) VALUES ($1, $2,now())",
+                &[&id, &wallet_hex],
+            )
+            .await
+        {
+            Ok(row) => {
+                info!("INSERT success: {:?}", row);
+                row
+            }
+            Err(error) => {
+                warn!("INSERT failed :{:?}!!", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(
+                    Some(error.to_string()),
+                ));
+            }
+        };
+
     }
 
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))

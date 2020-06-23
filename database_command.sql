@@ -9,3 +9,8 @@ create table digital_currency(
     create_time timestamp,
     update_time timestamp NOT NULL
 );
+create table transaction_history(
+    id varchar(255) PRIMARY KEY NOT NULL,
+    owner text,
+    create_time timestamp
+);
