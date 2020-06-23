@@ -172,59 +172,105 @@ pub async fn digital_meta(
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
 }
 
-
 //根据总额度申请接口货币接口
 #[derive(Deserialize, Debug)]
-pub struct AmountRequset{
+pub struct AmountRequset {
     bank_num: String, // Base64过银行卡号
-    amount: u64, //总金额数(u64)
-    target: String  //所有者
+    amount: u64,      //总金额数(u64)
+    target: String,   //所有者
 }
 
 #[post("/api/external/exchange")]
 pub async fn amount_exchange(
     data: web::Data<Pool>,
+    config: web::Data<ConfigPath>,
     req: web::Json<AmountRequset>,
-) -> impl Responder{
+) -> impl Responder {
     //连接数据库句柄
     let conn = data.get().await.unwrap();
+    let mut rng = thread_rng();
+
+    //read file for get seed
+    let mut file = match File::open(&config.meta_path).await {
+        Ok(f) => {
+            info!("{:?}", f);
+            f
+        }
+        Err(e) => {
+            warn!("file open failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_file_error());
+        }
+    };
+    //read json file to string
+    let mut contents = String::new();
+    match file.read_to_string(&mut contents).await {
+        Ok(s) => {
+            info!("{:?}", s);
+            s
+        }
+        Err(e) => {
+            warn!("read file to string failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //deserialize to the specified data format
+    let keypair_value: keypair::Keypair<
+        [u8; 32],
+        Sha3,
+        dislog_hal_sm2::PointInner,
+        dislog_hal_sm2::ScalarInner,
+    > = match serde_json::from_str(&contents) {
+        Ok(de) => {
+            info!("{:?}", de);
+            de
+        }
+        Err(e) => {
+            warn!("Keypair generate failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //pass encode hex conversion get seed
+    let seed: [u8; 32] = keypair_value.get_seed();
+    //get  digital signature
+    let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
+
     //存储拆分后的额度
-    let mut quota_vec:Vec<(u64,u64)> = Vec::new();
+    let mut quota_vec: Vec<(u64, u64)> = Vec::new();
     //总额度拆分----------------------begin-------------------
-    let hundred_num:u64 = req.amount/10000;
-    if hundred_num > 0{
+    let hundred_num: u64 = req.amount / 10000;
+    if hundred_num > 0 {
         quota_vec.push((10000, hundred_num));
     }
-    let fifty_num:u64 = (req.amount%10000)/5000;
-    if fifty_num > 0{
+    let fifty_num: u64 = (req.amount % 10000) / 5000;
+    if fifty_num > 0 {
         quota_vec.push((5000, fifty_num));
     }
-    let twenty_num:u64 = (req.amount%5000)/2000;
-    if twenty_num > 0{
+    let twenty_num: u64 = (req.amount % 5000) / 2000;
+    if twenty_num > 0 {
         quota_vec.push((2000, twenty_num));
     }
-    let ten_num:u64 = ((req.amount%5000)%2000)/1000;
-    if ten_num > 0{
+    let ten_num: u64 = ((req.amount % 5000) % 2000) / 1000;
+    if ten_num > 0 {
         quota_vec.push((1000, ten_num));
     }
-    let five_num:u64 = (req.amount%1000)/500;
-    if five_num > 0{
+    let five_num: u64 = (req.amount % 1000) / 500;
+    if five_num > 0 {
         quota_vec.push((500, five_num));
     }
-    let one_num:u64 = (req.amount%500)/100;
-    if one_num > 0{
+    let one_num: u64 = (req.amount % 500) / 100;
+    if one_num > 0 {
         quota_vec.push((100, one_num));
     }
-    let pentagon_num:u64 = (req.amount%100)/50;
-    if pentagon_num > 0{
+    let pentagon_num: u64 = (req.amount % 100) / 50;
+    if pentagon_num > 0 {
         quota_vec.push((50, pentagon_num));
     }
-    let dime_num:u64 = (req.amount%50)/10;
-    if dime_num > 0{
+    let dime_num: u64 = (req.amount % 50) / 10;
+    if dime_num > 0 {
         quota_vec.push((10, dime_num));
     }
-    let point_num:u64 = req.amount%10;
-    if point_num >0{
+    let point_num: u64 = req.amount % 10;
+    if point_num > 0 {
         quota_vec.push((1, point_num));
     }
     //------------------------end----------------------------
@@ -263,7 +309,7 @@ pub async fn amount_exchange(
     }
     let owner_vec = Vec::<u8>::from_hex(req.target.clone()).unwrap();
     let owner = CertificateSm2::from_bytes(&owner_vec).unwrap();
-    let mut currency :Vec<String> = Vec::new();
+    let mut currency: Vec<String> = Vec::new();
     for (quota, number) in quota_vec.iter() {
         let str_quota = serde_json::to_value(&quota).unwrap();
         let size_number = *number as usize;
@@ -283,13 +329,13 @@ pub async fn amount_exchange(
             warn!("amount_exchange SELECT check uid failed,please check uid value");
             return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
         }
-        for item in select_statement.iter().take(size_number){
+        for item in select_statement.iter().take(size_number) {
             let id: String = item.get(0);
             let quota_hex: String = item.get(1);
             let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();
             let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
             match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3",
-            &[&old_state,&req.target,&id])
+            &[&old_state,&req.target.to_ascii_lowercase(),&id])
             .await{
                 Ok(row) => {
                     info!("update success!{:?}", row);
@@ -300,12 +346,76 @@ pub async fn amount_exchange(
                     return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
                 }
             };
-            let digital_currency = DigitalCurrencyWrapper::new(
+            let mut digital_currency = DigitalCurrencyWrapper::new(
                 MsgType::DigitalCurrency,
                 DigitalCurrency::new(quota_control_field, owner.clone()),
             );
+            digital_currency.fill_kvhead(&keypair_sm2, &mut rng).unwrap();
             currency.push(digital_currency.to_bytes().encode_hex::<String>());
         }
     }
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
+}
+
+
+//传入一组数字货币返回总额度
+#[derive(Deserialize, Debug)]
+pub struct CurrencyRequset {
+    bank_num: String, // Base64过银行卡号
+    currency: Vec<String>,      //需要查询的一组数字货币
+}
+
+//提现
+#[post("/api/external/widthdraw")]
+pub async fn currency_widthdraw(
+    data: web::Data<Pool>,
+    req: web::Json<CurrencyRequset>,
+) -> impl Responder{
+    //连接数据库
+    let conn = data.get().await.unwrap();
+    //货币状态
+    let use_state = String::from("circulation");
+    let unuse_state = String::from("suspended");
+    //总额度数
+    let mut amount: u64 = 0;
+    for currency_quota in req.currency.iter(){
+        let currency_vec = Vec::<u8>::from_hex(currency_quota).unwrap();
+        let digital_currency = DigitalCurrencyWrapper::from_bytes(&currency_vec).unwrap();
+        let quota_control_field = digital_currency.get_body().get_quota_info();
+        let quota = quota_control_field.get_body().get_value();
+        let str_quota = serde_json::to_value(&quota).unwrap();
+        amount += quota;
+        let select_statement = match conn
+            .query("select id from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
+        &[&unuse_state, &str_quota]).await{
+            Ok(row) => {
+                info!("select success!{:?}", row);
+                row
+            }
+            Err(error) => {
+                warn!("currency_widthdraw select failde!!{:?}", error);
+                return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
+            }
+        };
+        if select_statement.is_empty() {
+            warn!("SELECT check currency_widthdraw failed,please check digital_currency value");
+            return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+        }
+        //每张货币唯一标识id
+        let id: String = select_statement[0].get(0);
+        match conn.query("UPDATE digital_currency SET state = $1,owner = NULL,update_time = now() where id = $2", 
+            &[&use_state, &id])
+            .await
+            {
+                Ok(row) => {
+                    info!("update success!{:?}", row);
+                    row
+                }
+                Err(error) => {
+                    warn!("currency_widthdraw update failde!!{:?}", error);
+                    return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
+                }
+            };
+    }
+    HttpResponse::Ok().json(ResponseBody::new_success(Some(amount)))
 }

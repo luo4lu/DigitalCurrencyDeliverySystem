@@ -19,6 +19,8 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::prelude::*;
+use crate::config_command;
+use clap::ArgMatches;
 //数据库相关
 use deadpool_postgres::Pool;
 
@@ -135,10 +137,15 @@ pub async fn new_quotas_request(
         return HttpResponse::Ok().json(ResponseBody::<()>::new_json_parse_error());
     }
     let issue_hex = issue.to_bytes().encode_hex::<String>();
-
     //Http请求中心管理系统对额度请求重新签名
+    let mut cmc_url = String::new();
+    let matches: ArgMatches = config_command::get_command();
+    if let Some(c) = matches.value_of("cms"){
+        cmc_url = "http://".to_string() + &c + "/api/dcds/qouta_issue";
+    }else{
+        cmc_url = String::from("http://localhost:8077/api/dcds/qouta_issue");
+    }
     let params = CentralRequest::new(issue_hex);
-    let cmc_url = String::from("http://localhost:8077/api/dcds/qouta_issue");
     let cmc_client = reqwest::Client::new();
     let cmc_res = cmc_client
         .post(&cmc_url)
@@ -149,9 +156,14 @@ pub async fn new_quotas_request(
     let cmc_response: IssueResponse = cmc_res.json().await.unwrap();
 
     //Http请求额度管理系统生成额度控制位
+    let mut qms_url = String::new();
+    if let Some(q) = matches.value_of("qms"){
+        qms_url = "http://".to_string() + &q + "/api/quota";
+    }else{
+        qms_url = String::from("http://localhost:8088/api/quota");
+    }
     let repeat_issue = cmc_response.data;
     let params_to = QuotaRequest::new(repeat_issue);
-    let qms_url = String::from("http://localhost:8088/api/quota");
     let qms_client = reqwest::Client::new();
     let qms_res = qms_client
         .post(&qms_url)
@@ -225,9 +237,55 @@ pub async fn new_quotas_request(
 
 //兑换数字货币
 #[post("/api/convert")]
-pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> impl Responder {
+pub async fn conver_currency(data: web::Data<Pool>, config: web::Data<ConfigPath>, 
+    req: web::Json<String>) -> impl Responder {
     //连接数据库句柄
     let conn = data.get().await.unwrap();
+    let mut rng = thread_rng();
+
+    //read file for get seed
+    let mut file = match File::open(&config.meta_path).await {
+        Ok(f) => {
+            info!("{:?}", f);
+            f
+        }
+        Err(e) => {
+            warn!("file open failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_file_error());
+        }
+    };
+    //read json file to string
+    let mut contents = String::new();
+    match file.read_to_string(&mut contents).await {
+        Ok(s) => {
+            info!("{:?}", s);
+            s
+        }
+        Err(e) => {
+            warn!("read file to string failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //deserialize to the specified data format
+    let keypair_value: keypair::Keypair<
+        [u8; 32],
+        Sha3,
+        dislog_hal_sm2::PointInner,
+        dislog_hal_sm2::ScalarInner,
+    > = match serde_json::from_str(&contents) {
+        Ok(de) => {
+            info!("{:?}", de);
+            de
+        }
+        Err(e) => {
+            warn!("Keypair generate failed:{:?}", e);
+            return HttpResponse::Ok().json(ResponseBody::<()>::new_str_conver_error());
+        }
+    };
+    //pass encode hex conversion get seed
+    let seed: [u8; 32] = keypair_value.get_seed();
+    //get  digital signature
+    let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
     //解析hex出数据结构
     let temp = Vec::<u8>::from_hex(req.clone()).unwrap();
     let currency = CurrencyConvertRequestWrapper::from_bytes(&temp).unwrap();
@@ -288,7 +346,6 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
         let quota_hex = quota_control_field.to_bytes().encode_hex::<String>();
         let wallet_cert = value.get_body().get_wallet_cert();
         wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
-
         let select_state = match conn
             .query(
                 "SELECT * from digital_currency where quota_control_field = $1 AND state = $2 AND owner = $3",
@@ -378,10 +435,11 @@ pub async fn conver_currency(data: web::Data<Pool>, req: web::Json<String>) -> i
                 }
             };
             //生成数字货币信息
-            let digital_currency = DigitalCurrencyWrapper::new(
+            let mut digital_currency = DigitalCurrencyWrapper::new(
                 MsgType::DigitalCurrency,
                 DigitalCurrency::new(quota_control_field, target.clone()),
             );
+            digital_currency.fill_kvhead(&keypair_sm2, &mut rng).unwrap();
             new_digital_currency.push(digital_currency.to_bytes().encode_hex::<String>());
         }
     }
