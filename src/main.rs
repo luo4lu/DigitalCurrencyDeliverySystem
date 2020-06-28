@@ -1,5 +1,4 @@
 use actix_web::{App, HttpServer};
-use log;
 mod admin_meta;
 mod config;
 mod config_command;
@@ -7,8 +6,8 @@ mod get_quota_info;
 mod internal_meta;
 mod public_transaction;
 mod quotas_request;
-use actix_cors::Cors;
-use clap::ArgMatches; //跨域crate
+use actix_cors::Cors; //跨域crate
+use clap::ArgMatches;
 
 pub mod response;
 
