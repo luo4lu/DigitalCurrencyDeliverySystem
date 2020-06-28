@@ -66,7 +66,6 @@ pub async fn digital_transaction(
     let seed: [u8; 32] = keypair_value.get_seed();
     //get  digital signature
     let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
-
     //新的货币所有者存储
     let mut currency: Vec<String> = Vec::new();
     //存储到数据库
