@@ -4,13 +4,9 @@ use actix_web::{post, web, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
-//use common_structure::digital_currency::DigitalCurrencyWrapper;
-use common_structure::transaction:: TransactionWrapper;
+use common_structure::transaction::TransactionWrapper;
 use dislog_hal::Bytes;
 use hex::{FromHex, ToHex};
-//use kv_object::kv_object::MsgType;
-//use kv_object::prelude::KValueObject;
-//use kv_object::sm2::CertificateSm2;
 use kv_object::sm2::KeyPairSm2;
 use log::{info, warn};
 use rand::thread_rng;
@@ -70,7 +66,7 @@ pub async fn digital_transaction(
     let seed: [u8; 32] = keypair_value.get_seed();
     //get  digital signature
     let keypair_sm2: KeyPairSm2 = KeyPairSm2::generate_from_seed(seed).unwrap();
-    
+
     //新的货币所有者存储
     let mut currency: Vec<String> = Vec::new();
     //存储到数据库
@@ -114,7 +110,7 @@ pub async fn digital_transaction(
             warn!("SELECT check quota_control_field failed,please check quota_control_field value");
             return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
         }
-        let id:String = select_state[0].get(0);
+        let id: String = select_state[0].get(0);
         let statement = match conn
             .prepare("UPDATE digital_currency SET owner = $1,update_time = now() WHERE quota_control_field = $2")
             .await{
@@ -160,7 +156,6 @@ pub async fn digital_transaction(
                 ));
             }
         };
-
     }
 
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))

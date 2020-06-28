@@ -1,9 +1,11 @@
 use crate::config::ConfigPath;
+use crate::config_command;
 use crate::response::ResponseBody;
 use actix_web::{post, web, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
+use clap::ArgMatches;
 use common_structure::currency_convert_request::CurrencyConvertRequestWrapper;
 use common_structure::digital_currency::{DigitalCurrency, DigitalCurrencyWrapper};
 use common_structure::issue_quota_request::{IssueQuotaRequest, IssueQuotaRequestWrapper};
@@ -19,8 +21,6 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::prelude::*;
-use crate::config_command;
-use clap::ArgMatches;
 //数据库相关
 use deadpool_postgres::Pool;
 
@@ -138,43 +138,47 @@ pub async fn new_quotas_request(
     }
     let issue_hex = issue.to_bytes().encode_hex::<String>();
     //Http请求中心管理系统对额度请求重新签名
-    let mut cmc_url = String::new();
+    info!("中心管理系统货币开始注册\n");
+    let mut _cmc_url = String::new();
     let matches: ArgMatches = config_command::get_command();
-    if let Some(c) = matches.value_of("cms"){
-        cmc_url = "http://".to_string() + &c + "/api/dcds/qouta_issue";
-    }else{
-        cmc_url = String::from("http://localhost:8077/api/dcds/qouta_issue");
+    if let Some(c) = matches.value_of("cms") {
+        _cmc_url = "http://".to_string() + &c + "/api/dcds/qouta_issue";
+    } else {
+        _cmc_url = String::from("http://localhost:8077/api/dcds/qouta_issue");
     }
     let params = CentralRequest::new(issue_hex);
     let cmc_client = reqwest::Client::new();
     let cmc_res = cmc_client
-        .post(&cmc_url)
+        .post(&_cmc_url)
         .json(&params)
         .send()
         .await
         .unwrap();
     let cmc_response: IssueResponse = cmc_res.json().await.unwrap();
+    info!("中心管理系统货币注册完成\n");
 
     //Http请求额度管理系统生成额度控制位
-    let mut qms_url = String::new();
-    if let Some(q) = matches.value_of("qms"){
-        qms_url = "http://".to_string() + &q + "/api/quota";
-    }else{
-        qms_url = String::from("http://localhost:8088/api/quota");
+    info!("开始数字货币额度管理系统申请额度\n");
+    let mut _qms_url = String::new();
+    if let Some(q) = matches.value_of("qms") {
+        _qms_url = "http://".to_string() + &q + "/api/quota";
+    } else {
+        _qms_url = String::from("http://localhost:8088/api/quota");
     }
     let repeat_issue = cmc_response.data;
     let params_to = QuotaRequest::new(repeat_issue);
     let qms_client = reqwest::Client::new();
     let qms_res = qms_client
-        .post(&qms_url)
+        .post(&_qms_url)
         .json(&params_to)
         .send()
         .await
         .unwrap();
     let qms_response: QuotaResponse = qms_res.json().await.unwrap();
     let queta_control_vec = qms_response.data;
-
+    info!("数字货币额度管理系统申请完成\n");
     //组建支付货币列表
+    info!("货币发行系统开始生成数字货币\n");
     for (_index, quota) in queta_control_vec.iter().enumerate() {
         let deser_vec = Vec::<u8>::from_hex(&quota).unwrap();
         let mut quota_control_field = QuotaControlFieldWrapper::from_bytes(&deser_vec).unwrap();
@@ -231,14 +235,18 @@ pub async fn new_quotas_request(
             }
         };
     }
+    info!("数字货币生成完成！！\n");
 
     HttpResponse::Ok().json(ResponseBody::<()>::new_success(None))
 }
 
 //兑换数字货币
 #[post("/api/convert")]
-pub async fn conver_currency(data: web::Data<Pool>, config: web::Data<ConfigPath>, 
-    req: web::Json<String>) -> impl Responder {
+pub async fn conver_currency(
+    data: web::Data<Pool>,
+    config: web::Data<ConfigPath>,
+    req: web::Json<String>,
+) -> impl Responder {
     //连接数据库句柄
     let conn = data.get().await.unwrap();
     let mut rng = thread_rng();
@@ -439,7 +447,9 @@ pub async fn conver_currency(data: web::Data<Pool>, config: web::Data<ConfigPath
                 MsgType::DigitalCurrency,
                 DigitalCurrency::new(quota_control_field, target.clone()),
             );
-            digital_currency.fill_kvhead(&keypair_sm2, &mut rng).unwrap();
+            digital_currency
+                .fill_kvhead(&keypair_sm2, &mut rng)
+                .unwrap();
             new_digital_currency.push(digital_currency.to_bytes().encode_hex::<String>());
         }
     }

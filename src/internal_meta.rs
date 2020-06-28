@@ -180,6 +180,7 @@ pub struct AmountRequset {
     target: String,   //所有者
 }
 
+//发行货币
 #[post("/api/external/exchange")]
 pub async fn amount_exchange(
     data: web::Data<Pool>,
@@ -350,19 +351,21 @@ pub async fn amount_exchange(
                 MsgType::DigitalCurrency,
                 DigitalCurrency::new(quota_control_field, owner.clone()),
             );
-            digital_currency.fill_kvhead(&keypair_sm2, &mut rng).unwrap();
+            digital_currency
+                .fill_kvhead(&keypair_sm2, &mut rng)
+                .unwrap();
             currency.push(digital_currency.to_bytes().encode_hex::<String>());
         }
     }
+
     HttpResponse::Ok().json(ResponseBody::new_success(Some(currency)))
 }
-
 
 //传入一组数字货币返回总额度
 #[derive(Deserialize, Debug)]
 pub struct CurrencyRequset {
-    bank_num: String, // Base64过银行卡号
-    currency: Vec<String>,      //需要查询的一组数字货币
+    bank_num: String,      // Base64过银行卡号
+    currency: Vec<String>, //需要查询的一组数字货币
 }
 
 //提现
@@ -370,7 +373,7 @@ pub struct CurrencyRequset {
 pub async fn currency_widthdraw(
     data: web::Data<Pool>,
     req: web::Json<CurrencyRequset>,
-) -> impl Responder{
+) -> impl Responder {
     //连接数据库
     let conn = data.get().await.unwrap();
     //货币状态
@@ -378,7 +381,7 @@ pub async fn currency_widthdraw(
     let unuse_state = String::from("suspended");
     //总额度数
     let mut amount: u64 = 0;
-    for currency_quota in req.currency.iter(){
+    for currency_quota in req.currency.iter() {
         let currency_vec = Vec::<u8>::from_hex(currency_quota).unwrap();
         let digital_currency = DigitalCurrencyWrapper::from_bytes(&currency_vec).unwrap();
         let quota_control_field = digital_currency.get_body().get_quota_info();

@@ -1,4 +1,4 @@
-create database DigitalCurrencyDeliverySystem;
+create database test_digitalcurrencydeliverysystem;
 
 create table digital_currency(
     id varchar(255) PRIMARY KEY NOT NULL,
