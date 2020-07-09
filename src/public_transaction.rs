@@ -1,6 +1,6 @@
 use crate::config::ConfigPath;
 use crate::response::ResponseBody;
-use actix_web::{post, web, HttpResponse, Responder};
+use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
@@ -21,7 +21,13 @@ pub async fn digital_transaction(
     data: web::Data<Pool>,
     config: web::Data<ConfigPath>,
     req: web::Json<Vec<String>>,
+    req_head: HttpRequest,
 ) -> impl Responder {
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
+    //随机数生成器
     let mut _rng = thread_rng();
     //read file for get seed
     let mut file = match File::open(&config.meta_path).await {
@@ -90,8 +96,8 @@ pub async fn digital_transaction(
         currency.push(pre_currency.to_bytes().encode_hex::<String>());
         let select_state = match conn
             .query(
-                "SELECT id from digital_currency where quota_control_field = $1",
-                &[&old_quota_control],
+                "SELECT id from digital_currency where quota_control_field = $1 AND cloud_user_id = $2",
+                &[&old_quota_control, &head_str],
             )
             .await
         {
@@ -112,7 +118,7 @@ pub async fn digital_transaction(
         }
         let id: String = select_state[0].get(0);
         let statement = match conn
-            .prepare("UPDATE digital_currency SET owner = $1,update_time = now() WHERE quota_control_field = $2")
+            .prepare("UPDATE digital_currency SET owner = $1,update_time = now() WHERE quota_control_field = $2 AND cloud_user_id = $3")
             .await{
                 Ok(s) => {
                     info!("database command success!");
@@ -124,7 +130,7 @@ pub async fn digital_transaction(
                 }
             };
         match conn
-            .execute(&statement, &[&wallet_hex, &old_quota_control])
+            .execute(&statement, &[&wallet_hex, &old_quota_control, &head_str])
             .await
         {
             Ok(s) => {
@@ -140,8 +146,8 @@ pub async fn digital_transaction(
         };
         match conn
             .query(
-                "INSERT INTO transaction_history (id, owner, create_time) VALUES ($1, $2,now())",
-                &[&id, &wallet_hex],
+                "INSERT INTO transaction_history (id, owner, cloud_user_id, create_time) VALUES ($1, $2, $3, now())",
+                &[&id, &wallet_hex, &head_str],
             )
             .await
         {

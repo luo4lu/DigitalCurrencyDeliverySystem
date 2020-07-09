@@ -1,11 +1,9 @@
-use crate::config::ConfigPath;
-use crate::config_command;
+use crate::config::{CMSRequestAddr, ConfigPath, QCSRequestAddr};
 use crate::response::ResponseBody;
-use actix_web::{post, web, HttpResponse, Responder};
+use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
-use clap::ArgMatches;
 use common_structure::currency_convert_request::CurrencyConvertRequestWrapper;
 use common_structure::digital_currency::{DigitalCurrency, DigitalCurrencyWrapper};
 use common_structure::issue_quota_request::{IssueQuotaRequest, IssueQuotaRequestWrapper};
@@ -70,10 +68,16 @@ pub async fn new_quotas_request(
     data: web::Data<Pool>,
     config: web::Data<ConfigPath>,
     req: web::Json<Vec<QuotasRequest>>,
+    req_head: HttpRequest,
 ) -> impl Responder {
     let mut rng = thread_rng();
     //连接数据库
     let conn = data.get().await.unwrap();
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
+    let head_name: &str = &*String::from("X-CLOUD-USER_ID");
     //read file for get seed
     let mut file = match File::open(&config.meta_path).await {
         Ok(f) => {
@@ -138,47 +142,39 @@ pub async fn new_quotas_request(
     }
     let issue_hex = issue.to_bytes().encode_hex::<String>();
     //Http请求中心管理系统对额度请求重新签名
-    info!("中心管理系统货币开始注册\n");
-    let mut _cmc_url = String::new();
-    let matches: ArgMatches = config_command::get_command();
-    if let Some(c) = matches.value_of("cms") {
-        _cmc_url = "http://".to_string() + &c + "/api/dcds/qouta_issue";
-    } else {
-        _cmc_url = String::from("http://localhost:8077/api/dcds/qouta_issue");
-    }
+    warn!("中心管理系统货币开始注册\n");
+
+    let central_request = CMSRequestAddr::new();
     let params = CentralRequest::new(issue_hex);
     let cmc_client = reqwest::Client::new();
     let cmc_res = cmc_client
-        .post(&_cmc_url)
+        .post(&central_request.central_addr)
+        .header(head_name, head_str)
         .json(&params)
         .send()
         .await
         .unwrap();
     let cmc_response: IssueResponse = cmc_res.json().await.unwrap();
-    info!("中心管理系统货币注册完成\n");
+    warn!("中心管理系统货币注册完成\n");
 
     //Http请求额度管理系统生成额度控制位
-    info!("开始数字货币额度管理系统申请额度\n");
-    let mut _qms_url = String::new();
-    if let Some(q) = matches.value_of("qms") {
-        _qms_url = "http://".to_string() + &q + "/api/quota";
-    } else {
-        _qms_url = String::from("http://localhost:8088/api/quota");
-    }
+    warn!("开始数字货币额度管理系统申请额度\n");
+    let quota_request = QCSRequestAddr::new();
     let repeat_issue = cmc_response.data;
     let params_to = QuotaRequest::new(repeat_issue);
     let qms_client = reqwest::Client::new();
     let qms_res = qms_client
-        .post(&_qms_url)
+        .post(&quota_request.quota_addr)
+        .header(head_name, head_str)
         .json(&params_to)
         .send()
         .await
         .unwrap();
     let qms_response: QuotaResponse = qms_res.json().await.unwrap();
     let queta_control_vec = qms_response.data;
-    info!("数字货币额度管理系统申请完成\n");
+    warn!("数字货币额度管理系统申请完成\n");
     //组建支付货币列表
-    info!("货币发行系统开始生成数字货币\n");
+    warn!("货币发行系统开始生成数字货币\n");
     for (_index, quota) in queta_control_vec.iter().enumerate() {
         let deser_vec = Vec::<u8>::from_hex(&quota).unwrap();
         let mut quota_control_field = QuotaControlFieldWrapper::from_bytes(&deser_vec).unwrap();
@@ -204,7 +200,7 @@ pub async fn new_quotas_request(
         let insert_statement = match conn
             .prepare(
                 "INSERT INTO digital_currency (id, quota_control_field, explain_info, 
-                state, create_time, update_time) VALUES ($1, $2, $3, $4, now(), now())",
+                state, cloud_user_id, create_time, update_time) VALUES ($1, $2, $3, $4, $5, now(), now())",
             )
             .await
         {
@@ -220,7 +216,10 @@ pub async fn new_quotas_request(
             }
         };
         match conn
-            .execute(&insert_statement, &[&id, &quota_hex, &jsonb_quota, &state])
+            .execute(
+                &insert_statement,
+                &[&id, &quota_hex, &jsonb_quota, &state, &head_str],
+            )
             .await
         {
             Ok(s) => {
@@ -235,7 +234,7 @@ pub async fn new_quotas_request(
             }
         };
     }
-    info!("数字货币生成完成！！\n");
+    warn!("数字货币生成完成！！\n");
 
     HttpResponse::Ok().json(ResponseBody::<()>::new_success(None))
 }
@@ -246,7 +245,12 @@ pub async fn conver_currency(
     data: web::Data<Pool>,
     config: web::Data<ConfigPath>,
     req: web::Json<String>,
+    req_head: HttpRequest,
 ) -> impl Responder {
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
     //连接数据库句柄
     let conn = data.get().await.unwrap();
     let mut rng = thread_rng();
@@ -317,8 +321,8 @@ pub async fn conver_currency(
         let str_quota = serde_json::to_value(&quota).unwrap();
         let size_number = *number as usize;
         let select_statement = match conn
-            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
-        &[&new_state, &str_quota]).await{
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 AND cloud_user_id = $3",
+        &[&new_state, &str_quota, &head_str]).await{
             Ok(row) => {
                 info!("select success!{:?}", row);
                 row
@@ -356,8 +360,8 @@ pub async fn conver_currency(
         wallet_hex = wallet_cert.to_bytes().encode_hex::<String>();
         let select_state = match conn
             .query(
-                "SELECT * from digital_currency where quota_control_field = $1 AND state = $2 AND owner = $3",
-                &[&quota_hex, &old_state,&wallet_hex],
+                "SELECT * from digital_currency where quota_control_field = $1 AND state = $2 AND owner = $3 AND cloud_user_id = $4",
+                &[&quota_hex, &old_state,&wallet_hex,&head_str],
             ).await{
                 Ok(row) => {
                     info!("electe success: {:?}", row);
@@ -375,7 +379,7 @@ pub async fn conver_currency(
             return HttpResponse::Ok().json(ResponseBody::<()>::database_build_error());
         }
         let statement = match conn
-            .prepare("UPDATE digital_currency SET state = $1, owner = NULL,update_time = now() WHERE quota_control_field = $2")
+            .prepare("UPDATE digital_currency SET state = $1, owner = NULL,update_time = now() WHERE quota_control_field = $2 AND cloud_user_id = $3")
             .await{
                 Ok(s) => {
                     info!("database command success!");
@@ -386,7 +390,10 @@ pub async fn conver_currency(
                     return HttpResponse::Ok().json(ResponseBody::<String>::database_runing_error(Some(error.to_string())));
                 }
             };
-        match conn.execute(&statement, &[&new_state, &quota_hex]).await {
+        match conn
+            .execute(&statement, &[&new_state, &quota_hex, &head_str])
+            .await
+        {
             Ok(s) => {
                 info!("database parameter success!");
                 s
@@ -408,8 +415,8 @@ pub async fn conver_currency(
         let str_quota = serde_json::to_value(&quota).unwrap();
         let size_number = *number as usize;
         let select_statement = match conn
-            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
-        &[&new_state, &str_quota]).await{
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 AND cloud_user_id = $3",
+        &[&new_state, &str_quota, &head_str]).await{
             Ok(row) => {
                 info!("select success!{:?}", row);
                 row
@@ -429,8 +436,8 @@ pub async fn conver_currency(
             let quota_hex: String = item.get(1);
             let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();
             let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
-            match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3", 
-            &[&old_state, &wallet_hex, &id])
+            match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3 AND cloud_user_id = $4", 
+            &[&old_state, &wallet_hex, &id, &head_str])
             .await
             {
                 Ok(row) => {

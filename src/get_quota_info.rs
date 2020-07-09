@@ -1,5 +1,5 @@
 use crate::response::ResponseBody;
-use actix_web::{get, web, HttpResponse, Responder};
+use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
 use log::{info, warn};
 //数据库相关
 use chrono::NaiveDateTime;
@@ -7,7 +7,11 @@ use deadpool_postgres::Pool;
 use serde::{Deserialize, Serialize};
 
 #[get("/api/quota/detail")]
-pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
+pub async fn get_all_quota_info(data: web::Data<Pool>, req_head: HttpRequest) -> impl Responder {
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
     //连接数据库
     let conn = data.get().await.unwrap();
     //存储获取到的额度与数理的数组
@@ -32,8 +36,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
     let point_value = serde_json::to_value(&point).unwrap();
     let hundred_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&hundred_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 AND cloud_user_id = $2",
+            &[&hundred_value, &head_str],
         )
         .await
     {
@@ -53,8 +57,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let fifty_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&fifty_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 AND cloud_user_id = $2",
+            &[&fifty_value, &head_str],
         )
         .await
     {
@@ -74,8 +78,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let twenty_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&twenty_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 AND cloud_user_id = $2",
+            &[&twenty_value, &head_str],
         )
         .await
     {
@@ -95,8 +99,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let ten_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&ten_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 cloud_user_id = $2",
+            &[&ten_value, &head_str],
         )
         .await
     {
@@ -116,8 +120,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let five_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&five_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 cloud_user_id = $2",
+            &[&five_value, &head_str],
         )
         .await
     {
@@ -137,8 +141,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let one_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&one_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 cloud_user_id = $2",
+            &[&one_value, &head_str],
         )
         .await
     {
@@ -158,8 +162,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let pentagon_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&pentagon_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 cloud_user_id = $2",
+            &[&pentagon_value, &head_str],
         )
         .await
     {
@@ -179,8 +183,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let dime_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&dime_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 cloud_user_id = $2",
+            &[&dime_value, &head_str],
         )
         .await
     {
@@ -200,8 +204,8 @@ pub async fn get_all_quota_info(data: web::Data<Pool>) -> impl Responder {
 
     let point_state = match conn
         .query(
-            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 ",
-            &[&point_value],
+            "select id from digital_currency where (explain_info->'t_obj'->'value') = $1 cloud_user_id = $2",
+            &[&point_value, &head_str],
         )
         .await
     {
@@ -242,7 +246,15 @@ struct GetAllQoutaResponse {
 }
 
 #[get("/api/quota/detail/info")]
-pub async fn get_all_quota(data: web::Data<Pool>, req: web::Query<QuotaRequest>) -> impl Responder {
+pub async fn get_all_quota(
+    data: web::Data<Pool>,
+    req: web::Query<QuotaRequest>,
+    req_head: HttpRequest,
+) -> impl Responder {
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
     //连接数据库
     let conn = data.get().await.unwrap();
 
@@ -250,11 +262,11 @@ pub async fn get_all_quota(data: web::Data<Pool>, req: web::Query<QuotaRequest>)
 
     match conn
         .query("SELECT digital_currency.id, (digital_currency.explain_info->'t_obj'->'value')::BIGINT as value, digital_currency.create_time, digital_currency.owner FROM digital_currency ORDER BY digital_c
-urrency.create_time OFFSET $1 LIMIT $2",
-    &[&offset, &req.page_size]).await{
+urrency.create_time OFFSET $1 LIMIT $2 where cloud_user_id = $3",
+    &[&offset, &req.page_size, &head_str]).await{
         Ok(row) => {
             //info!("select success!{:?}", row);\
-            let total_state = conn.query("SELECT COUNT(*) FROM digital_currency",&[]).await.unwrap();
+            let total_state = conn.query("SELECT COUNT(*) FROM digital_currency where cloud_user_id = $1",&[&head_str]).await.unwrap();
             let total: i64 = total_state[0].get(0);
             let mut v = Vec::new();
             for r in row {
@@ -299,18 +311,23 @@ struct GetAllTranscationResponse {
 pub async fn get_all_transcation(
     data: web::Data<Pool>,
     req: web::Query<HistoryRequest>,
+    req_head: HttpRequest,
 ) -> impl Responder {
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
     //连接数据库
     let conn = data.get().await.unwrap();
 
     let offset = (req.page - 1) * req.page_size;
 
     match conn
-        .query("SELECT transaction_history.id, transaction_history.create_time, transaction_history.owner FROM transaction_history where id=$1 ORDER BY create_time OFFSET $2 LIMIT $3",
-    &[&req.id, &offset, &req.page_size]).await{
+        .query("SELECT transaction_history.id, transaction_history.create_time, transaction_history.owner FROM transaction_history where id=$1 ORDER BY create_time OFFSET $2 LIMIT $3 where cloud_user_id = $4",
+    &[&req.id, &offset, &req.page_size, &head_str]).await{
         Ok(row) => {
             //info!("select success!{:?}", row);\
-            let total_state = conn.query("SELECT COUNT(*) FROM transaction_history where id = $1",&[&req.id]).await.unwrap();
+            let total_state = conn.query("SELECT COUNT(*) FROM transaction_history where id = $1 AND cloud_user_id = $2",&[&req.id, &head_str]).await.unwrap();
             let total: i64 = total_state[0].get(0);
             let mut v = Vec::new();
             for r in row {

@@ -6,11 +6,13 @@ create table digital_currency(
     explain_info jsonb NOT NULL,
     state varchar(255) NOT NULL,
     owner text,
+    cloud_user_id varchar(255) NOT NULL,
     create_time timestamp,
     update_time timestamp NOT NULL
 );
 create table transaction_history(
     id varchar(255) PRIMARY KEY NOT NULL,
     owner text,
+    cloud_user_id varchar(255) NOT NULL,
     create_time timestamp
 );

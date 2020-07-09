@@ -1,6 +1,6 @@
 use crate::config::ConfigPath;
 use crate::response::ResponseBody;
-use actix_web::{post, web, HttpResponse, Responder};
+use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
 use asymmetric_crypto::hasher::sha3::Sha3;
 use asymmetric_crypto::keypair;
 use asymmetric_crypto::prelude::Keypair;
@@ -31,8 +31,14 @@ pub async fn digital_meta(
     data: web::Data<Pool>,
     config: web::Data<ConfigPath>,
     req: web::Json<Vec<InternalMetaRequest>>,
+    req_head: HttpRequest,
 ) -> impl Responder {
     let mut rng = thread_rng();
+
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
     //read file for get seed
     let mut file = match File::open(&config.meta_path).await {
         Ok(f) => {
@@ -137,7 +143,7 @@ pub async fn digital_meta(
         let jsonb_quota = serde_json::to_value(&quota_control_field2).unwrap();
 
         let statement = match conn.prepare("INSERT INTO digital_currency (id, quota_control_field, explain_info, 
-                    state, owner, create_time, update_time) VALUES ($1, $2, $3, $4, $5, now(), now())")
+                    state, owner, cloud_user_id, create_time, update_time) VALUES ($1, $2, $3, $4, $5, $6, now(), now())")
             .await{
                 Ok(s) => {
                     info!("database command success!");
@@ -151,7 +157,14 @@ pub async fn digital_meta(
         match conn
             .execute(
                 &statement,
-                &[&id, &quota_hex, &jsonb_quota, &state, &wallet_hex],
+                &[
+                    &id,
+                    &quota_hex,
+                    &jsonb_quota,
+                    &state,
+                    &wallet_hex,
+                    &head_str,
+                ],
             )
             .await
         {
@@ -186,7 +199,12 @@ pub async fn amount_exchange(
     data: web::Data<Pool>,
     config: web::Data<ConfigPath>,
     req: web::Json<AmountRequset>,
+    req_head: HttpRequest,
 ) -> impl Responder {
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
     //连接数据库句柄
     let conn = data.get().await.unwrap();
     let mut rng = thread_rng();
@@ -285,8 +303,8 @@ pub async fn amount_exchange(
         let str_quota = serde_json::to_value(&quota).unwrap();
         let size_number = *number as usize;
         let select_statement = match conn
-            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
-        &[&new_state, &str_quota]).await{
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 AND cloud_user_id = $3 ",
+        &[&new_state, &str_quota, &head_str]).await{
             Ok(row) => {
                 info!("select success!{:?}", row);
                 row
@@ -315,8 +333,8 @@ pub async fn amount_exchange(
         let str_quota = serde_json::to_value(&quota).unwrap();
         let size_number = *number as usize;
         let select_statement = match conn
-            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
-        &[&new_state,&str_quota]).await{
+            .query("select id, quota_control_field from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 AND cloud_user_id = $3 ",
+        &[&new_state,&str_quota, &head_str]).await{
             Ok(row) => {
                 info!("select success!{:?}",row);
                 row
@@ -335,8 +353,8 @@ pub async fn amount_exchange(
             let quota_hex: String = item.get(1);
             let quota_vec = Vec::<u8>::from_hex(quota_hex).unwrap();
             let quota_control_field = QuotaControlFieldWrapper::from_bytes(&quota_vec).unwrap();
-            match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3",
-            &[&old_state,&req.target.to_ascii_lowercase(),&id])
+            match conn.query("UPDATE digital_currency SET state = $1,owner = $2,update_time = now() where id = $3 AND cloud_user_id = $4",
+            &[&old_state,&req.target.to_ascii_lowercase(),&id, &head_str])
             .await{
                 Ok(row) => {
                     info!("update success!{:?}", row);
@@ -373,7 +391,12 @@ pub struct CurrencyRequset {
 pub async fn currency_widthdraw(
     data: web::Data<Pool>,
     req: web::Json<CurrencyRequset>,
+    req_head: HttpRequest,
 ) -> impl Responder {
+    //获取请求头中的uuid
+    let http_head = req_head.headers();
+    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_str = head_value.to_str().unwrap();
     //连接数据库
     let conn = data.get().await.unwrap();
     //货币状态
@@ -389,8 +412,8 @@ pub async fn currency_widthdraw(
         let str_quota = serde_json::to_value(&quota).unwrap();
         amount += quota;
         let select_statement = match conn
-            .query("select id from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 ",
-        &[&unuse_state, &str_quota]).await{
+            .query("select id from digital_currency where state = $1 AND (explain_info->'t_obj'->'value') = $2 AND cloud_user_id = $3 ",
+        &[&unuse_state, &str_quota, &head_str]).await{
             Ok(row) => {
                 info!("select success!{:?}", row);
                 row
@@ -406,8 +429,8 @@ pub async fn currency_widthdraw(
         }
         //每张货币唯一标识id
         let id: String = select_statement[0].get(0);
-        match conn.query("UPDATE digital_currency SET state = $1,owner = NULL,update_time = now() where id = $2", 
-            &[&use_state, &id])
+        match conn.query("UPDATE digital_currency SET state = $1,owner = NULL,update_time = now() where id = $2 AND cloud_user_id = $3", 
+            &[&use_state, &id, &head_str])
             .await
             {
                 Ok(row) => {

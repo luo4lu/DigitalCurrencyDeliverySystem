@@ -20,10 +20,10 @@ pub fn get_command() -> ArgMatches<'static> {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("qms")
+            Arg::with_name("qcs")
                 .short("q")
-                .long("qms")
-                .help("set to Quota manage system IP addr and port")
+                .long("qcs")
+                .help("set to Quota central system IP addr and port")
                 .takes_value(true),
         )
         .get_matches()
