@@ -8,14 +8,15 @@ mod public_transaction;
 mod quotas_request;
 use actix_cors::Cors; //跨域crate
 use clap::ArgMatches;
+use log::Level;
 
 pub mod response;
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     //Initialize the log and set the print level
-    //simple_logger::init_with_level(Level::Warn).unwrap();
-    env_logger::init();
+    simple_logger::init_with_level(Level::Warn).unwrap();
+    //env_logger::init();
     let mut _path: String = String::new();
     let matches: ArgMatches = config_command::get_command();
     if let Some(d) = matches.value_of("dcds") {
