@@ -25,7 +25,7 @@ impl CMSRequestAddr {
         let mut _addr = String::new();
         let matches: ArgMatches = config_command::get_command();
         if let Some(c) = matches.value_of("cms") {
-            _addr = "http://".to_string() + &c + "/api/dcds/qouta_issue";
+            _addr = "http://".to_string() + c + "/api/dcds/qouta_issue";
         } else {
             _addr = String::from("http://localhost:8077/api/dcds/qouta_issue");
         }
@@ -44,7 +44,7 @@ impl QCSRequestAddr {
         let mut _addr = String::new();
         let matches: ArgMatches = config_command::get_command();
         if let Some(q) = matches.value_of("qcs") {
-            _addr = "http://".to_string() + &q + "/api/quota";
+            _addr = "http://".to_string() + q + "/api/quota";
         } else {
             _addr = String::from("http://localhost:8088/api/quota");
         }

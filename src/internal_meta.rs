@@ -395,7 +395,7 @@ pub async fn currency_widthdraw(
 ) -> impl Responder {
     //获取请求头中的uuid
     let http_head = req_head.headers();
-    let head_value = http_head.get("X-CLOUD-USER_ID").unwrap();
+    let head_value = http_head.get("X-USERID").unwrap();
     let head_str = head_value.to_str().unwrap();
     //连接数据库
     let conn = data.get().await.unwrap();
